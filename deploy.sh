@@ -16,7 +16,6 @@ for var in "${REQUIRED_VARS[@]}"; do
         echo "❌ ERROR: $var is not set"
         exit 1
     fi
-    # Show first few chars for debugging (not full secret)
     echo "  ✅ $var: ${!var:0:4}..."
 done
 
@@ -34,18 +33,7 @@ if [[ -z "$INSTANCE_IDS" ]]; then
 fi
 echo "✅ Instances found: $INSTANCE_IDS"
 
-# Check SSM connectivity first
-echo "🔍 Checking SSM connectivity..."
-for INSTANCE_ID in $INSTANCE_IDS; do
-    echo "  Checking $INSTANCE_ID..."
-    aws ssm describe-instance-information \
-        --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
-        --query "InstanceInformationList[0].PingStatus" \
-        --output text \
-        --region "$REGION" || echo "  ❌ Cannot reach instance via SSM"
-done
-
-# Test with simple command first
+# ================= Test SSM =================
 echo "🚀 Testing SSM with simple command..."
 TEST_CMD_ID=$(aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
@@ -56,46 +44,14 @@ TEST_CMD_ID=$(aws ssm send-command \
     --output text \
     --region "$REGION")
 
-echo "📄 Test Command ID: $TEST_CMD_ID"
-
-# Wait for test command
 for INSTANCE_ID in $INSTANCE_IDS; do
-    echo "--------------------------------------------"
-    echo "🔍 Test result for: $INSTANCE_ID"
-    echo "--------------------------------------------"
-    
     aws ssm wait command-executed \
         --command-id "$TEST_CMD_ID" \
         --instance-id "$INSTANCE_ID" \
-        --region "$REGION" 2>/dev/null || true
-    
-    OUTPUT=$(aws ssm get-command-invocation \
-        --command-id "$TEST_CMD_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "StandardOutputContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Failed to get output")
-    
-    ERROR=$(aws ssm get-command-invocation \
-        --command-id "$TEST_CMD_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "StandardErrorContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Failed to get error")
-    
-    STATUS=$(aws ssm get-command-invocation \
-        --command-id "$TEST_CMD_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "Status" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Unknown")
-    
-    echo "Status: $STATUS"
-    echo "Output: $OUTPUT"
-    echo "Error: $ERROR"
+        --region "$REGION" || true
 done
 
-# Only proceed if test was successful
+# ================= Deployment =================
 echo "🚀 Sending deployment command..."
 COMMAND_ID=$(aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
@@ -104,46 +60,37 @@ COMMAND_ID=$(aws ssm send-command \
     --parameters "commands=[
         \"set -e\",
         \"echo 'Starting deployment...'\",
-        \"echo 'Current directory: \$(pwd)'\",
         \"echo 'User: \$(whoami)'\",
         \"\",
-        \"# Clean and prepare directory\",
-        \"sudo rm -rf '$APP_DIR'/* 2>/dev/null || true\",
-        \"sudo mkdir -p '$APP_DIR'\",
-        \"sudo chown -R $USER:$USER '$APP_DIR'\",
+        \"# 🔥 FIX: remove directory completely\",
+        \"rm -rf '$APP_DIR' 2>/dev/null || true\",
+        \"mkdir -p '$APP_DIR'\",
+        \"chown -R $USER:$USER '$APP_DIR'\",
         \"cd '$APP_DIR'\",
         \"\",
-        \"# Clone the repository\",
-        \"echo 'Cloning $GIT_REPO...'\",
-        \"git clone '$GIT_REPO' . || { echo 'Git clone failed'; exit 1; }\",
+        \"# Clone repository\",
+        \"git clone '$GIT_REPO' .\",
         \"rm -rf .git\",
         \"\",
-        \"# Create .env.local\",
+        \"# Create env file\",
         \"cat > .env.local <<'EOF'\",
         \"LIVEKIT_API_KEY=$LIVEKIT_API_KEY\",
         \"LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET\",
         \"LIVEKIT_URL=$LIVEKIT_URL\",
         \"EOF\",
-        \"sudo chmod 600 .env.local\",
+        \"chmod 600 .env.local\",
         \"\",
-        \"# Install dependencies\",
-        \"echo 'Installing pnpm...'\",
-        \"sudo npm install -g pnpm || { echo 'pnpm install failed'; exit 1; }\",
+        \"# Install pnpm\",
+        \"npm install -g pnpm\",
         \"\",
-        \"echo 'Installing project dependencies...'\",
-        \"pnpm install || { echo 'pnpm install failed'; exit 1; }\",
+        \"# Install deps\",
+        \"pnpm install\",
         \"\",
-        \"# Kill existing process if running\",
+        \"# Restart app\",
         \"pkill -f 'pnpm dev' 2>/dev/null || true\",
-        \"\",
-        \"# Start the agent\",
-        \"echo 'Starting agent...'\",
         \"nohup pnpm dev > /var/log/agent.log 2>&1 &\",
         \"\",
-        \"echo '✅ Deployment completed'\",
-        \"echo 'App dir: \$(pwd)'\",
-        \"echo 'Logs: /var/log/agent.log'\",
-        \"ps aux | grep -E 'node|pnpm' | grep -v grep\"
+        \"echo '✅ Deployment completed'\"
     ]" \
     --query "Command.CommandId" \
     --output text \
@@ -151,45 +98,19 @@ COMMAND_ID=$(aws ssm send-command \
 
 echo "📄 Deployment Command ID: $COMMAND_ID"
 
-# Wait and get results
 for INSTANCE_ID in $INSTANCE_IDS; do
     echo "--------------------------------------------"
-    echo "🔍 Deployment result for: $INSTANCE_ID"
+    echo "🔍 Result for $INSTANCE_ID"
     echo "--------------------------------------------"
-    
     aws ssm wait command-executed \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
-        --region "$REGION" 2>/dev/null || echo "Wait failed"
-    
-    OUTPUT=$(aws ssm get-command-invocation \
+        --region "$REGION" || true
+
+    aws ssm get-command-invocation \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
-        --query "StandardOutputContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Failed to get output")
-    
-    ERROR=$(aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "StandardErrorContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Failed to get error")
-    
-    STATUS=$(aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "Status" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "Unknown")
-    
-    echo "Status: $STATUS"
-    echo "Output:"
-    echo "$OUTPUT"
-    if [[ -n "$ERROR" && "$ERROR" != "Failed to get error" ]]; then
-        echo "Errors:"
-        echo "$ERROR"
-    fi
+        --region "$REGION"
 done
 
 echo "🎉 Deployment process completed!"
