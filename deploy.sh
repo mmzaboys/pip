@@ -5,7 +5,7 @@ set -e
 ASG_NAME="staging-agent-asg-2025121613551604090000000a"
 REGION="us-east-2"
 APP_DIR="/opt/agent"
-USER="ec2-user"
+USER="ubuntu"
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
 
 # Validate environment variables
