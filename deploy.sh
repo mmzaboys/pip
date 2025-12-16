@@ -11,9 +11,6 @@ GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
 
 # GitHub Actions / pipeline environment variables
 # Make sure these are exported in your workflow
-LIVEKIT_API_KEY="${LIVEKIT_API_KEY:?LIVEKIT_API_KEY not set}"
-LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET not set}"
-LIVEKIT_URL="${LIVEKIT_URL:?LIVEKIT_URL not set}"
 # =================================================
 
 echo "🔍 Fetching running instances in ASG '$ASG_NAME'..."
