@@ -135,7 +135,7 @@ resource "aws_iam_instance_profile" "agent_instance_profile" {
 
 resource "aws_launch_template" "agent" {
   name_prefix   = "${local.env}-agent-"
-  image_id      = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2
+  image_id      = "ami-00e428798e77d38d9"  # Amazon Linux 2
   instance_type = "t3.medium"
   key_name      = "lk"  # Update with your key pair name
   
@@ -179,15 +179,7 @@ EOT
     }
   }
 
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    
-    ebs {
-      volume_size = 30
-      volume_type = "gp3"
-      encrypted   = true
-    }
-  }
+  
 
   tags = {
     Name = "${local.env}-agent-launch-template"
