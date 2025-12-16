@@ -1,26 +1,31 @@
-name: Deploy LiveKit UI
+# .github/workflows/deploy.yml
+name: Deploy to ASG
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Run Deployment Script
-        env:
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-        run: |
-          chmod +x ./deploy.sh
-          ./deploy.sh
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2
+        
+    - name: Deploy to ASG instances
+      run: |
+        chmod +x ./deploy.sh
+        ./deploy.sh
+      env:
+        LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+        LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+        LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}

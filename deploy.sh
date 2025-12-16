@@ -1,17 +1,24 @@
 #!/bin/bash
-set -u
-set -e
+set -e  # Exit on error
 
 # ================= Configuration =================
-ASG_NAME="staging-agent-asg-2025121613551604090000000a"  # Your ASG name
-REGION="us-east-2"                # AWS region
-APP_DIR="/opt/agent"              # Deployment directory on EC2
-USER="ec2-user"                   # EC2 user
+ASG_NAME="staging-agent-asg-2025121613551604090000000a"
+REGION="us-east-2"
+APP_DIR="/opt/agent"
+USER="ec2-user"
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
 
-# GitHub Actions / pipeline environment variables
-# Make sure these are exported in your workflow
-# =================================================
+# Validate environment variables (from GitHub Secrets)
+echo "🔍 Validating environment variables..."
+REQUIRED_VARS=("LIVEKIT_API_KEY" "LIVEKIT_API_SECRET" "LIVEKIT_URL")
+for var in "${REQUIRED_VARS[@]}"; do
+    if [[ -z "${!var}" ]]; then
+        echo "❌ ERROR: $var is not set"
+        echo "Make sure it's set as a GitHub Secret and passed in workflow"
+        exit 1
+    fi
+    echo "  ✅ $var is set"
+done
 
 echo "🔍 Fetching running instances in ASG '$ASG_NAME'..."
 INSTANCE_IDS=$(aws ec2 describe-instances \
@@ -22,18 +29,18 @@ INSTANCE_IDS=$(aws ec2 describe-instances \
     --region "$REGION")
 
 if [[ -z "$INSTANCE_IDS" ]]; then
-    echo "❌ No running instances found!"
+    echo "❌ No running instances found in ASG!"
     exit 1
 fi
+
 echo "✅ Instances found: $INSTANCE_IDS"
 
 echo "🚀 Sending deployment command via SSM..."
 COMMAND_ID=$(aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
     --document-name "AWS-RunShellScript" \
-    --comment "Clone LiveKit agent repository and start dev server" \
+    --comment "Deploy LiveKit agent" \
     --parameters "commands=[
-        \"set -u\",
         \"set -e\",
         \"# Clean and prepare directory\",
         \"rm -rf '$APP_DIR'/* 2>/dev/null || true\",
@@ -45,12 +52,15 @@ COMMAND_ID=$(aws ssm send-command \
         \"git clone '$GIT_REPO' .\",
         \"rm -rf .git\",
         \"\",
-        \"# Create .env.local with pipeline variables\",
-        \"cat > .env.local <<'ENV'\",
+        \"# Create .env.local with environment variables\",
+        \"cat > .env.local <<'EOF'\",
         \"LIVEKIT_API_KEY=$LIVEKIT_API_KEY\",
         \"LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET\",
         \"LIVEKIT_URL=$LIVEKIT_URL\",
-        \"ENV\",
+        \"EOF\",
+        \"\",
+        \"# Secure the environment file\",
+        \"chmod 600 .env.local\",
         \"\",
         \"# Set permissions\",
         \"chown -R $USER:$USER '$APP_DIR'\",
@@ -59,11 +69,14 @@ COMMAND_ID=$(aws ssm send-command \
         \"# Install dependencies and start dev server\",
         \"npm install -g pnpm\",
         \"pnpm install\",
-        \"pnpm dev &\",
+        \"\",
+        \"# Start the agent (run in background)\",
+        \"nohup pnpm dev > /var/log/agent.log 2>&1 &\",
         \"\",
         \"# Verify deployment\",
-        \"echo 'Repository cloned and dev server started successfully in $APP_DIR'\",
-        \"ls -la\"
+        \"echo '✅ Deployment completed successfully'\",
+        \"echo 'App directory: $APP_DIR'\",
+        \"echo 'Log file: /var/log/agent.log'\"
     ]" \
     --query "Command.CommandId" \
     --output text \
@@ -71,7 +84,7 @@ COMMAND_ID=$(aws ssm send-command \
 
 echo "📄 SSM Command ID: $COMMAND_ID"
 
-# ================= Wait and fetch logs per instance =================
+# ================= Wait and fetch logs =================
 for INSTANCE_ID in $INSTANCE_IDS; do
     echo "--------------------------------------------"
     echo "🔍 Checking instance: $INSTANCE_ID"
@@ -89,17 +102,20 @@ for INSTANCE_ID in $INSTANCE_IDS; do
         --output text \
         --region "$REGION")
 
-    STDERR=$(aws ssm get-command-invocation \
+    ERROR=$(aws ssm get-command-invocation \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
         --query "StandardErrorContent" \
         --output text \
         --region "$REGION")
 
-    echo "📤 Standard Output:"
+    if [[ -n "$ERROR" ]]; then
+        echo "❌ Errors on $INSTANCE_ID:"
+        echo "$ERROR"
+    fi
+    
+    echo "📤 Output:"
     echo "$OUTPUT"
-    echo "📥 Standard Error:"
-    echo "$STDERR"
 done
 
-echo "🎉 Deployment completed on all instances."
+echo "🎉 Deployment completed on all instances!"
