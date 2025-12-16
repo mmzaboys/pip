@@ -98,7 +98,6 @@ COMMAND_ID=$(aws ssm send-command \
         \"\",
         \"echo '✅ Deployment complete!'\",
         \"echo 'Agent running on: http://localhost:3000'\",
-        \"echo 'Nginx proxy on: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)'\"
     ]" \
     --query "Command.CommandId" \
     --output text \
