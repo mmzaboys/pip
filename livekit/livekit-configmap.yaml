@@ -1,0 +1,29 @@
+# livekit-config-with-turn.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: livekit-config
+data:
+  livekit.yaml: |
+    port: 7880
+    bind_addresses:
+      - "0.0.0.0"
+    
+    rtc:
+      tcp_port: 7881
+      port_range_start: 50000
+      port_range_end: 60000
+    
+    turn:
+      enabled: true
+      domain: "depilivekit.accesscam.org"
+      tls_port: 5349
+      udp_port: 3478
+      cert_file: "/etc/livekit/tls/tls.crt"  # Correct path
+      key_file: "/etc/livekit/tls/tls.key"   # Correct path
+    
+    redis:
+      address: redis-service:6379
+    
+    keys:
+      APIMGpn7kZ7YUgU: NUReZAOWK47i7tt26G8yKl8it8GcmyId8psiN7hhTXP

@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit-deployment
+  labels:
+    app: livekit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: livekit
+  template:
+    metadata:
+      labels:
+        app: livekit
+    spec:
+      containers:
+      - name: livekit
+        image: livekit/livekit-server:latest
+        args:
+          - "--config=/etc/livekit/livekit.yaml"
+        ports:
+        - containerPort: 7880
+          name: http
+        - containerPort: 7881
+          name: rtc-tcp
+        - containerPort: 3478
+          name: turn-udp
+          protocol: UDP
+        - containerPort: 5349
+          name: turn-tls
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/livekit
+        - name: tls-volume
+          mountPath: /etc/livekit/tls
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: livekit-config
+      - name: tls-volume
+        secret:
+          secretName: tls-secret
+---
+# -------------------- LIVEKIT SERVICE --------------------
+# livekit-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-service
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "false"
+spec:
+  type: LoadBalancer
+  selector:
+    app: livekit
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 7880
+  - name: https
+    protocol: TCP
+    port: 443
+    targetPort: 7880  # LiveKit runs on 7880, not 443!
+  - name: rtc-tcp
+    protocol: TCP
+    port: 7881
+    targetPort: 7881
+  - name: turn-udp
+    protocol: UDP
+    port: 3478
+    targetPort: 3478
+  - name: turn-tls
+    protocol: TCP
+    port: 5349
+    targetPort: 5349

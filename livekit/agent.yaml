@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lk-agents
+  labels:
+    app: lk-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:              # ✅ FIXED (case-sensitive)
+      app: lk-agents
+  template:
+    metadata:
+      labels:
+        app: lk-agents
+    spec:
+      containers:
+        - name: livekit-agent
+          image: mahmoud00thedev/lk-agent:v1
