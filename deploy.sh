@@ -1,12 +1,19 @@
 #!/bin/bash
 set -u
+set -e
 
 # ================= Configuration =================
-ASG_NAME="staging-agent-asg-20251216003644356900000005"  # Your ASG name
-REGION="us-east-2"                # AWS region (us-east-2 as per your locals)
-APP_DIR="/opt/agent"             # Deployment directory on EC2
+ASG_NAME="staging-agent-asg-2025121613551604090000000a"  # Your ASG name
+REGION="us-east-2"                # AWS region
+APP_DIR="/opt/agent"              # Deployment directory on EC2
 USER="ec2-user"                   # EC2 user
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
+
+# GitHub Actions / pipeline environment variables
+# Make sure these are exported in your workflow
+LIVEKIT_API_KEY="${LIVEKIT_API_KEY:?LIVEKIT_API_KEY not set}"
+LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET not set}"
+LIVEKIT_URL="${LIVEKIT_URL:?LIVEKIT_URL not set}"
 # =================================================
 
 echo "🔍 Fetching running instances in ASG '$ASG_NAME'..."
@@ -27,8 +34,10 @@ echo "🚀 Sending deployment command via SSM..."
 COMMAND_ID=$(aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
     --document-name "AWS-RunShellScript" \
-    --comment "Clone repository via GitHub Actions" \
+    --comment "Clone LiveKit agent repository and start dev server" \
     --parameters "commands=[
+        \"set -u\",
+        \"set -e\",
         \"# Clean and prepare directory\",
         \"rm -rf '$APP_DIR'/* 2>/dev/null || true\",
         \"mkdir -p '$APP_DIR'\",
@@ -37,14 +46,26 @@ COMMAND_ID=$(aws ssm send-command \
         \"# Clone the repository\",
         \"echo 'Cloning $GIT_REPO...'\",
         \"git clone '$GIT_REPO' .\",
+        \"rm -rf .git\",
+        \"\",
+        \"# Create .env.local with pipeline variables\",
+        \"cat > .env.local <<'ENV'\",
+        \"LIVEKIT_API_KEY=$LIVEKIT_API_KEY\",
+        \"LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET\",
+        \"LIVEKIT_URL=$LIVEKIT_URL\",
+        \"ENV\",
         \"\",
         \"# Set permissions\",
         \"chown -R $USER:$USER '$APP_DIR'\",
         \"chmod -R 755 '$APP_DIR'\",
         \"\",
+        \"# Install dependencies and start dev server\",
+        \"npm install -g pnpm\",
+        \"pnpm install\",
+        \"pnpm dev &\",
+        \"\",
         \"# Verify deployment\",
-        \"echo 'Repository cloned successfully to $APP_DIR'\",
-        \"echo 'Files:'\",
+        \"echo 'Repository cloned and dev server started successfully in $APP_DIR'\",
         \"ls -la\"
     ]" \
     --query "Command.CommandId" \
@@ -84,4 +105,4 @@ for INSTANCE_ID in $INSTANCE_IDS; do
     echo "$STDERR"
 done
 
-echo "🎉 Repository cloned on all instances."
+echo "🎉 Deployment completed on all instances."
