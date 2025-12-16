@@ -2,7 +2,7 @@
 set -u
 
 # ================= Configuration =================
-ASG_NAME="hamsa"  # Your ASG name
+ASG_NAME="staging-agent-asg-20251216003644356900000005"  # Your ASG name
 REGION="us-east-2"                # AWS region (us-east-2 as per your locals)
 APP_DIR="/opt/agent"             # Deployment directory on EC2
 USER="ec2-user"                   # EC2 user
