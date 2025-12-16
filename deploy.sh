@@ -51,6 +51,7 @@ aws ssm send-command \
         \"chmod 600 .env.local\",
         \"\",
         \"echo 'Ensure pnpm'\",
+        \"chown -R ec2-user:ec2-user /opt/agent\",
         \"command -v pnpm >/dev/null 2>&1 || npm install -g pnpm\",
         \"\",
         \"echo 'Install deps'\",
