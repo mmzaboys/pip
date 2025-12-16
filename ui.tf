@@ -131,8 +131,16 @@ resource "aws_iam_instance_profile" "agent_instance_profile" {
 }
 
 # User Data Script for Agent Installation
-data "template_file" "user_data" {
-  template = <<-EOF
+
+
+resource "aws_launch_template" "agent" {
+  name_prefix   = "${local.env}-agent-"
+  image_id      = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2
+  instance_type = "t3.medium"
+  key_name      = "lk"  # Update with your key pair name
+  
+  # User data with minimal installation only
+  user_data = base64encode(<<-EOT
 #!/bin/bash
 set -ex
 
@@ -143,83 +151,17 @@ yum update -y
 curl -sL https://rpm.nodesource.com/setup_18.x | bash -
 yum install -y nodejs git
 
-# Install pnpm
+# Install pnpm globally
 npm install -g pnpm
-
-# Install Nginx
-amazon-linux-extras install -y nginx1
-systemctl enable nginx
-systemctl start nginx
-
-# Configure Nginx as reverse proxy for the agent
-cat > /etc/nginx/conf.d/agent.conf <<'NGINXCONF'
-server {
-    listen 80;
-    server_name _;
-    
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-NGINXCONF
-
-# Test Nginx configuration and reload
-nginx -t && systemctl reload nginx
 
 # Create agent directory
 mkdir -p /opt/agent
-cd /opt/agent
+chown -R ec2-user:ec2-user /opt/agent
 
-# Clone the agent starter repository
-git clone https://github.com/livekit-examples/agent-starter-react.git .
-rm -rf .git
-
-# Install dependencies
-pnpm install
-
-# Create systemd service for the agent
-cat > /etc/systemd/system/agent.service <<'SERVICECONF'
-[Unit]
-Description=LiveKit Agent Starter
-After=network.target
-
-[Service]
-Type=simple
-User=ec2-user
-WorkingDirectory=/opt/agent
-Environment=NODE_ENV=production
-ExecStart=/usr/bin/pnpm start
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-SERVICECONF
-
-# Start the agent service
-systemctl daemon-reload
-systemctl enable agent
-systemctl start agent
-
-EOF
-}
-
-# Launch Template
-resource "aws_launch_template" "agent" {
-  name_prefix   = "${local.env}-agent-"
-  # Amazon Linux 2 AMI for us-east-2
-  image_id      = "ami-02f3416038bdb17fb"  
-  instance_type = "t3.medium"
-  key_name      = "lk"  # Update with your key pair name
-  user_data     = base64encode(data.template_file.user_data.rendered)
+# The rest (Nginx, service file, etc.) will be handled by deploy.sh
+# This keeps the initial instance setup minimal and fast
+EOT
+  )
 
   iam_instance_profile {
     name = aws_iam_instance_profile.agent_instance_profile.name

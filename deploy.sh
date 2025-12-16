@@ -6,7 +6,7 @@ REGION="us-east-2"
 APP_DIR="/opt/agent"
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
 
-# Validate
+# Validate environment variables
 for var in LIVEKIT_API_KEY LIVEKIT_API_SECRET LIVEKIT_URL; do
     [[ -z "${!var}" ]] && { echo "❌ $var not set"; exit 1; }
 done
@@ -22,27 +22,28 @@ INSTANCE_IDS=$(aws ec2 describe-instances \
 [[ -z "$INSTANCE_IDS" ]] && { echo "❌ No instances"; exit 1; }
 echo "✅ Instances: $INSTANCE_IDS"
 
-echo "🚀 Deploying..."
+echo "🚀 Deploying agent code..."
 COMMAND_ID=$(aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
     --document-name "AWS-RunShellScript" \
     --comment "Deploy LiveKit agent" \
-    --timeout-seconds 600 \
+    --timeout-seconds 300 \
     --parameters "commands=[
         \"set -e\",
-        \"echo '1. Installing Node.js 18.x...'\",
-        \"curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -\",
-        \"sudo apt-get install -y nodejs\",
+        \"echo '1. Installing/updating Nginx...'\",
+        \"amazon-linux-extras install -y nginx1 2>/dev/null || true\",
+        \"systemctl enable nginx 2>/dev/null || true\",
+        \"systemctl start nginx 2>/dev/null || true\",
         \"\",
         \"echo '2. Setting up app directory...'\",
-        \"sudo mkdir -p '$APP_DIR'\",
-        \"sudo chown -R ubuntu:ubuntu '$APP_DIR'\",
+        \"mkdir -p '$APP_DIR'\",
+        \"chown -R ec2-user:ec2-user '$APP_DIR'\",
         \"cd '$APP_DIR'\",
         \"\",
         \"echo '3. Cloning repo...'\",
-        \"sudo rm -rf * .[^.]* 2>/dev/null || true\",
+        \"rm -rf * .[^.]* 2>/dev/null || true\",
         \"git clone '$GIT_REPO' .\",
-        \"sudo rm -rf .git\",
+        \"rm -rf .git\",
         \"\",
         \"echo '4. Creating env file...'\",
         \"cat > .env.local <<EOF\",
@@ -50,25 +51,62 @@ COMMAND_ID=$(aws ssm send-command \
         \"LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET\",
         \"LIVEKIT_URL=$LIVEKIT_URL\",
         \"EOF\",
+        \"chown ec2-user:ec2-user .env.local\",
         \"\",
-        \"echo '5. Installing pnpm and dependencies...'\",
-        \"sudo npm install -g pnpm\",
-        \"pnpm install\",
+        \"echo '5. Installing dependencies...'\",
+        \"sudo -u ec2-user pnpm install\",
         \"\",
-        \"echo '6. Starting agent...'\",
-        \"pkill -f 'pnpm dev' 2>/dev/null || true\",
-        \"nohup pnpm dev > /var/log/agent.log 2>&1 &\",
+        \"echo '6. Configuring Nginx...'\",
+        \"cat > /etc/nginx/conf.d/agent.conf <<'NGINX'\",
+        \"server {\",
+        \"    listen 80;\",
+        \"    server_name _;\",
+        \"    location / {\",
+        \"        proxy_pass http://localhost:3000;\",
+        \"        proxy_http_version 1.1;\",
+        \"        proxy_set_header Upgrade \\\$http_upgrade;\",
+        \"        proxy_set_header Connection 'upgrade';\",
+        \"        proxy_set_header Host \\\$host;\",
+        \"    }\",
+        \"}\",
+        \"NGINX\",
+        \"nginx -t && systemctl reload nginx || echo 'Nginx reload skipped'\",
         \"\",
-        \"echo '✅ Deployment done!'\",
-        \"echo 'Check: tail -f /var/log/agent.log'\" 
+        \"echo '7. Setting up systemd service...'\",
+        \"cat > /etc/systemd/system/agent.service <<'SERVICE'\",
+        \"[Unit]\",
+        \"Description=LiveKit Agent Starter\",
+        \"After=network.target\",
+        \"\",
+        \"[Service]\",
+        \"Type=simple\",
+        \"User=ec2-user\",
+        \"WorkingDirectory=/opt/agent\",
+        \"Environment=NODE_ENV=production\",
+        \"ExecStart=/usr/bin/pnpm start\",
+        \"Restart=always\",
+        \"RestartSec=10\",
+        \"\",
+        \"[Install]\",
+        \"WantedBy=multi-user.target\",
+        \"SERVICE\",
+        \"\",
+        \"echo '8. Starting agent...'\",
+        \"systemctl daemon-reload\",
+        \"systemctl enable agent\",
+        \"systemctl restart agent\",
+        \"\",
+        \"echo '✅ Deployment complete!'\",
+        \"echo 'Agent running on: http://localhost:3000'\",
+        \"echo 'Nginx proxy on: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)'\"
     ]" \
     --query "Command.CommandId" \
     --output text \
     --region "$REGION")
 
 echo "📄 Command ID: $COMMAND_ID"
-echo "⏳ Waiting 60 seconds..."
-sleep 60
+echo "⏳ Waiting for deployment..."
+sleep 30
 
 for INSTANCE_ID in $INSTANCE_IDS; do
     echo "--- $INSTANCE_ID ---"
@@ -80,13 +118,6 @@ for INSTANCE_ID in $INSTANCE_IDS; do
         --output text \
         --region "$REGION" 2>/dev/null || echo "No output")
     
-    ERROR=$(aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "StandardErrorContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "No error")
-    
     STATUS=$(aws ssm get-command-invocation \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
@@ -95,9 +126,17 @@ for INSTANCE_ID in $INSTANCE_IDS; do
         --region "$REGION" 2>/dev/null || echo "Unknown")
     
     echo "Status: $STATUS"
-    echo "Output:"
-    echo "$OUTPUT"
-    [[ -n "$ERROR" && "$ERROR" != "No error" ]] && echo "Error: $ERROR"
+    echo "Output (last few lines):"
+    echo "$OUTPUT" | tail -20
 done
 
-echo "🎉 Done!"
+echo "🎉 Deployment process completed!"
+echo "📋 Agents should be accessible via:"
+for INSTANCE_ID in $INSTANCE_IDS; do
+    PUBLIC_IP=$(aws ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query "Reservations[0].Instances[0].PublicIpAddress" \
+        --output text \
+        --region "$REGION" 2>/dev/null || echo "No public IP")
+    echo "  http://$PUBLIC_IP"
+done
