@@ -6,7 +6,7 @@ REGION="us-east-2"
 APP_DIR="/opt/agent"
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
 
-# Validate
+# Validate env vars
 for var in LIVEKIT_API_KEY LIVEKIT_API_SECRET LIVEKIT_URL; do
     [[ -z "${!var}" ]] && { echo "❌ $var not set"; exit 1; }
 done
@@ -20,82 +20,60 @@ INSTANCE_IDS=$(aws ec2 describe-instances \
     --region "$REGION")
 
 [[ -z "$INSTANCE_IDS" ]] && { echo "❌ No instances"; exit 1; }
-echo "✅ Instances: $INSTANCE_IDS"
 
-echo "🚀 Simple deployment..."
-CMD_ID=$(aws ssm send-command \
+echo "🚀 Deploying..."
+
+aws ssm send-command \
     --instance-ids $INSTANCE_IDS \
     --document-name "AWS-RunShellScript" \
-    --comment "Simple agent deploy" \
-    --timeout-seconds 300 \
+    --comment "Agent deploy (fixed)" \
+    --timeout-seconds 600 \
     --parameters "commands=[
-        \"# Stop existing\",
+        \"set -e\",
+        \"echo 'Stopping old app'\",
         \"pkill -f 'pnpm dev' 2>/dev/null || true\",
         \"\",
-        \"# Setup\",
-        \"rm -rf '$APP_DIR'/* 2>/dev/null || true\",
+        \"echo 'Reset app dir'\",
+        \"rm -rf '$APP_DIR'\",
         \"mkdir -p '$APP_DIR'\",
         \"cd '$APP_DIR'\",
         \"\",
-        \"# Clone\",
+        \"echo 'Clone repo'\",
         \"git clone '$GIT_REPO' .\",
         \"rm -rf .git\",
         \"\",
-        \"# Env\",
+        \"echo 'Create env file'\",
         \"cat > .env.local <<EOF\",
         \"LIVEKIT_API_KEY=$LIVEKIT_API_KEY\",
         \"LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET\",
         \"LIVEKIT_URL=$LIVEKIT_URL\",
         \"EOF\",
+        \"chmod 600 .env.local\",
         \"\",
-        \"# Install (skip if already done)\",
-        \"if [ ! -d node_modules ]; then\",
-        \"    pnpm install\",
-        \"fi\",
+        \"echo 'Ensure pnpm'\",
+        \"command -v pnpm >/dev/null 2>&1 || npm install -g pnpm\",
         \"\",
-        \"# Start\",
+        \"echo 'Install deps'\",
+        \"pnpm install\",
+        \"\",
+        \"echo 'Start agent'\",
         \"nohup pnpm dev > agent.log 2>&1 &\",
-        \"echo '✅ Agent started on port 3000'\",
-        \"echo 'Check: tail -f agent.log'\"
+        \"sleep 3\",
+        \"ps aux | grep -E '(node|pnpm)' | grep -v grep\",
+        \"echo '✅ Agent running'\"
     ]" \
-    --query "Command.CommandId" \
-    --output text \
-    --region "$REGION")
+    --region "$REGION"
 
-echo "📄 Command ID: $CMD_ID"
-echo "⏳ Wait 60 seconds for install..."
-sleep 60
+echo "⏳ Waiting 20s..."
+sleep 20
 
 for INSTANCE_ID in $INSTANCE_IDS; do
-    echo ""
-    echo "--- $INSTANCE_ID ---"
-    
-    # Quick check
-    CHECK_ID=$(aws ssm send-command \
-        --instance-ids $INSTANCE_ID \
-        --document-name "AWS-RunShellScript" \
-        --parameters "commands=[\"ps aux | grep -E '(node|pnpm)' | grep -v grep | wc -l\"]" \
-        --query "Command.CommandId" \
-        --output text \
-        --region "$REGION")
-    
-    sleep 3
-    PROCESS_COUNT=$(aws ssm get-command-invocation \
-        --command-id "$CHECK_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --query "StandardOutputContent" \
-        --output text \
-        --region "$REGION" 2>/dev/null || echo "0")
-    
     PUBLIC_IP=$(aws ec2 describe-instances \
         --instance-ids "$INSTANCE_ID" \
         --query "Reservations[0].Instances[0].PublicIpAddress" \
         --output text \
-        --region "$REGION" 2>/dev/null || echo "No IP")
-    
-    echo "Processes: $PROCESS_COUNT"
-    echo "Access: http://$PUBLIC_IP:3000"
+        --region "$REGION")
+    echo "🌍 http://$PUBLIC_IP:3000"
 done
 
-echo ""
-echo "🎉 Done! Try accessing the agent URLs above."
+echo "🎉 Done"
