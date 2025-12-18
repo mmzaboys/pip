@@ -26,4 +26,4 @@ data:
       address: redis-service:6379
     
     keys:
-      APIMGpn7kZ7YUgU: NUReZAOWK47i7tt26G8yKl8it8GcmyId8psiN7hhTXP
+      APIMGpn7kZ7YUgU: NUReZAOWK47i7tt26G8yKl8it8GcmyId8psiN7hhT
