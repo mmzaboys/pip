@@ -270,6 +270,20 @@ resource "aws_lb_listener" "http" {
     Name = "${local.env}-agent-http-listener"
   }
 }
+resource "aws_lb_listener" "ui_port" {
+  load_balancer_arn = aws_lb.agent_lb.arn
+  port              = 3000
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.agent.arn
+  }
+
+  tags = {
+    Name = "${local.env}-agent-http-listener"
+  }
+}
 # Additional EC2 Instance from Custom AMI
 resource "aws_instance" "custom_agent" {
   ami           = "ami-09eccb9e1b3400041"  # Replace with your custom AMI ID
