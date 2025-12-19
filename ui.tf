@@ -233,6 +233,19 @@ resource "aws_lb" "agent_lb" {
     Name = "${local.env}-agent-load-balancer"
   }
 }
+resource "aws_lb_target_group" "agent_3000" {
+  name        = "${local.env}-agent-tg-3000"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "instance"
+
+  health_check {
+    path     = "/"
+    protocol = "HTTP"
+    matcher  = "200-399"
+  }
+}
 
 resource "aws_lb_target_group" "agent" {
   name        = "${local.env}-agent-tg"
@@ -270,20 +283,7 @@ resource "aws_lb_listener" "http" {
     Name = "${local.env}-agent-http-listener"
   }
 }
-resource "aws_lb_listener" "ui_port" {
-  load_balancer_arn = aws_lb.agent_lb.arn
-  port              = 3000
-  protocol          = "TCP"
 
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.agent.arn
-  }
-
-  tags = {
-    Name = "${local.env}-agent-http-listener"
-  }
-}
 # Additional EC2 Instance from Custom AMI
 resource "aws_instance" "custom_agent" {
   ami           = "ami-09eccb9e1b3400041"  # Replace with your custom AMI ID
@@ -304,6 +304,17 @@ resource "aws_instance" "custom_agent" {
   }
 
 
+
+}
+resource "aws_lb_listener" "agent_3000" {
+  load_balancer_arn = aws_lb.agent_lb.arn
+  port              = 3000
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.agent_3000.arn
+  }
 }
 
 
