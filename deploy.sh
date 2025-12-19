@@ -2,7 +2,7 @@
 set -e
 
 # ================= Configuration =================
-ASG_NAME="staging-agent-asg-2025121820353576960000000a"
+ASG_NAME="staging-agent-asg-2025121912013180880000000a"
 REGION="us-east-2"
 APP_DIR="/opt/agent"
 GIT_REPO="https://github.com/livekit-examples/agent-starter-react.git"
